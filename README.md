@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=120&section=header&text=COMBIBUS&fontSize=70&fontAlignY=35&animation=twinkling" width="100%"/>
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=120&section=header&text=COMBIUS&fontSize=70&fontAlignY=35&animation=twinkling" width="100%"/>
 </p>
 
 <p align="center">
@@ -92,5 +92,5 @@ python combius.py
 Combius is a proprietary tool for education ONLY!.
 If you've discovered a improvement, or improved it open a discussion.
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=100&section=footer&text=Safe%20Operations%20%E2%80%A2%20Always&fontSize=30&fontAlignY=70" />
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=100&section=footer&text=Made with Love%20%E2%80%A2%20By Mijatol&fontSize=30&fontAlignY=70" />
 </p>
