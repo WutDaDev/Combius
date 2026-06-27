@@ -38,6 +38,7 @@ import threading
 import platform
 import subprocess
 import signal
+import requests
 from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
 from collections import deque
@@ -155,6 +156,10 @@ CONFIG = {
     "OWO_B_MIN_DELAY": env_int('OWO_B_MIN_DELAY', 0),
     "OWO_B_MAX_DELAY": env_int('OWO_B_MAX_DELAY', 0),
     "OWO_B_DELAY_JITTER": env_float('OWO_B_DELAY_JITTER', -1.0),
+    # User ID to ping when a "⚠ are you ..." style flag appears. Set to your numeric user id.
+    "ALERT_PING_USER_ID": os.environ.get('ALERT_PING_USER_ID', ''),
+    # Path to log file where flagged message JSON lines will be appended
+    "ALERT_LOG_FILE": os.environ.get('ALERT_LOG_FILE', 'flagged_messages.log'),
 }
 
 # Per-token gem overrides
@@ -832,6 +837,55 @@ class VerificationMonitor:
         self.alerted_channels = set()
         self.captcha_handler = CaptchaHandler()
         self.oah_captcha_keywords = CONFIG['OAH_CAPTCHA_KEYWORDS']
+
+    def handle_flagged_message(self, channel_id: str, msg: dict, dry_run: bool = False) -> bool:
+        """Log the full message payload, ping alert user if configured, and exit.
+
+        If dry_run is True, do not exit and just perform logging and ping attempt.
+        Returns True if handled.
+        """
+        ping_id = CONFIG.get('ALERT_PING_USER_ID', '')
+        log_path = CONFIG.get('ALERT_LOG_FILE', 'flagged_messages.log')
+        raw_content = msg.get('content', '')
+
+        # Full payload logging (append and also write a timestamped copy)
+        try:
+            log_entry = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'channel_id': channel_id,
+                'message_id': msg.get('id'),
+                'author': msg.get('author', {}),
+                'content': raw_content,
+                'attachments': msg.get('attachments', []),
+                'full_payload': msg,
+            }
+            # append to main log
+            with open(log_path, 'a', encoding='utf-8') as lf:
+                lf.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+
+            # write timestamped copy
+            ts = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+            ts_path = f"{log_path}.{ts}.json"
+            with open(ts_path, 'w', encoding='utf-8') as tf:
+                tf.write(json.dumps(log_entry, ensure_ascii=False, indent=2))
+
+            print(ui.info(f"  Logged flagged message to {log_path} and {ts_path}"))
+        except Exception as e:
+            print(ui.warning(f"  Failed to log flagged message: {e}"))
+
+        # Ping the configured user if available
+        if ping_id and str(ping_id).isdigit():
+            try:
+                self.api.send_message(channel_id, f"<@{ping_id}> You were flagged for verification in this channel. Stopping bot immediately.")
+            except Exception:
+                pass
+
+        if dry_run:
+            return True
+
+        # Exit immediately
+        print(ui.error("  ⛔ Flagged message detected; stopping immediately."))
+        os._exit(0)
     
     def check(self, channel_id: str = None) -> bool:
         """Check if verification is requested. Returns True if verification was detected and handled."""
@@ -882,6 +936,18 @@ class VerificationMonitor:
                     else:
                         print(ui.warning(f"  🌐 Open: {captcha_url}"))
 
+                    # Immediate stop + ping if message contains warning emoji and an "are you" prompt
+                    ping_id = CONFIG.get('ALERT_PING_USER_ID', '')
+                    raw_content = msg.get('content', '')
+                    if (('⚠' in raw_content or '⚠️' in raw_content) and 'are you' in content):
+                        if ping_id and str(ping_id).isdigit():
+                            try:
+                                self.api.send_message(ch, f"<@{ping_id}> You were flagged for verification in this channel. Stopping bot immediately.")
+                            except Exception:
+                                pass
+                        print(ui.error("  ⛔ Flagged message detected; stopping immediately and pinging alert user."))
+                        os._exit(0)
+
                     parsed_msg = components_v2.message.get_message_obj(msg)
                     verify_buttons = [
                         btn
@@ -896,7 +962,12 @@ class VerificationMonitor:
                                 self.alerted_channels.discard(ch)
                                 return True
                         print(ui.warning("  ⚠ Failed to click verify button automatically."))
-                    
+
+                    # If flagged with warning emoji + 'are you', handle via handler
+                    raw_content = msg.get('content', '')
+                    if (('⚠' in raw_content or '⚠️' in raw_content) and 'are you' in content):
+                        return self.handle_flagged_message(ch, msg)
+
                     if oah_image_flag or has_image_attachment:
                         for att in attachments:
                             img_url = att.get("url") or att.get("proxy_url")
