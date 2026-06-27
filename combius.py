@@ -123,6 +123,9 @@ CONFIG = {
     "CAPTCHA_SERVICE": os.environ.get('CAPTCHA_SERVICE', 'manual'),
     "CAPMONSTER_API_KEY": os.environ.get('CAPMONSTER_API_KEY', ''),
     "TWOCAPTCHA_API_KEY": os.environ.get('TWOCAPTCHA_API_KEY', ''),
+    "OCR_SPACE_API_KEY": os.environ.get('OCR_SPACE_API_KEY', ''),
+    "IMAGE_CAPTCHA_ENABLED": env_bool('IMAGE_CAPTCHA_ENABLED', True),
+    "CAPTCHA_IMAGE_LETTER_COUNT": env_int('CAPTCHA_IMAGE_LETTER_COUNT', 6),
     "OAH_CAPTCHA_KEYWORDS": env_list('OAH_CAPTCHA_KEYWORDS', 'enter the text,captcha image,image captcha,random text'),
     "OAH_CAPTCHA_MODE": os.environ.get('OAH_CAPTCHA_MODE', 'manual'),
     
@@ -547,7 +550,13 @@ class InventoryParser:
 # ============================================================
 
 class CaptchaHandler:
-    """Handles Discord hCaptcha challenges."""
+    """Handles Discord hCaptcha challenges.
+
+    Note: OAH captcha challenges may use randomized image text rather than
+    standard hCaptcha flows. Future integration should include OCR-based
+    solving from external modules like owo-dusk utils/image_to_text and
+    utils/captcha_solver.
+    """
     
     DISCORD_SITEKEY = "4c672d35-0701-42b2-88c3-78380b0db560"
     
@@ -555,6 +564,10 @@ class CaptchaHandler:
         self.service = CONFIG["CAPTCHA_SERVICE"]
         self.capmonster_key = CONFIG["CAPMONSTER_API_KEY"]
         self.twocaptcha_key = CONFIG["TWOCAPTCHA_API_KEY"]
+        self.ocr_space_key = CONFIG["OCR_SPACE_API_KEY"]
+        self.image_captcha_enabled = CONFIG["IMAGE_CAPTCHA_ENABLED"]
+        self.captcha_image_letter_count = CONFIG["CAPTCHA_IMAGE_LETTER_COUNT"]
+        self.oah_captcha_mode = CONFIG["OAH_CAPTCHA_MODE"]
     
     def solve(self, sitekey: str = DISCORD_SITEKEY, rqdata: str = "", 
               url: str = "https://discord.com/channels/@me") -> Optional[str]:
@@ -565,6 +578,134 @@ class CaptchaHandler:
             return self._twocaptcha(sitekey, rqdata, url)
         else:
             return self._manual(sitekey, url)
+
+    def solve_image(self, image_url: str) -> Optional[str]:
+        if not self.image_captcha_enabled:
+            return None
+        if self.oah_captcha_mode == 'onnx':
+            solution = self._onnx_solve(image_url)
+            if solution:
+                return solution
+            if self.ocr_space_key:
+                return self._ocr_space(image_url)
+            return None
+        if self.oah_captcha_mode == 'ocr_space':
+            return self._ocr_space(image_url)
+        return None
+
+    def _onnx_solve(self, image_url: str) -> Optional[str]:
+        try:
+            import io
+            import numpy as np
+            from PIL import Image
+            import onnxruntime
+        except ImportError as e:
+            print(ui.warning(f'  ⚠ ONNX solver unavailable: {e}'))
+            return None
+
+        model_path = "utils/captcha_solver/best.onnx"
+        if not os.path.exists(model_path):
+            print(ui.warning(f'  ⚠ ONNX model not found at {model_path}'))
+            return None
+
+        try:
+            onnx_session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        except Exception as e:
+            print(ui.warning(f'  ⚠ Failed to load ONNX model: {e}'))
+            return None
+
+        try:
+            r = requests.get(image_url, timeout=15)
+            if r.status_code != 200:
+                print(ui.error(f'  ⚠ Failed to fetch captcha image: {r.status_code}'))
+                return None
+            img_bytes = r.content
+            image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+            img_array = np.array(image)
+        except Exception as e:
+            print(ui.error(f'  ⚠ Error loading captcha image: {e}'))
+            return None
+
+        def letterbox(img_array, new_size=384, color=(114, 114, 114)):
+            img = Image.fromarray(img_array)
+            w, h = img.size
+            scale = min(new_size / w, new_size / h)
+            nw, nh = int(w * scale), int(h * scale)
+            img_resized = img.resize((nw, nh), Image.BILINEAR)
+            new_img = Image.new('RGB', (new_size, new_size), color)
+            paste_x = (new_size - nw) // 2
+            paste_y = (new_size - nh) // 2
+            new_img.paste(img_resized, (paste_x, paste_y))
+            return np.array(new_img)
+
+        try:
+            img = letterbox(img_array, 384)
+            img = img.astype(np.float32) / 255.0
+            img = np.transpose(img, (2, 0, 1))
+            img = np.expand_dims(img, axis=0)
+            input_name = onnx_session.get_inputs()[0].name
+            outputs = onnx_session.run(None, {input_name: img})[0]
+
+            detections = []
+            for det in outputs[0]:
+                x1, y1, x2, y2, conf, cls_id = det
+                if conf < 0.3:
+                    continue
+                detections.append({'char': chr(int(cls_id) + 97), 'conf': float(conf), 'cx': float((x1 + x2) / 2)})
+
+            if not detections:
+                print(ui.warning('  ⚠ ONNX solver detected no characters.'))
+                return None
+
+            detections.sort(key=lambda d: d['cx'])
+            captcha = ''.join(d['char'] for d in detections[:self.captcha_image_letter_count])
+            print(ui.success(f'  ✅ ONNX solved captcha text: {captcha}'))
+            return captcha
+        except Exception as e:
+            print(ui.error(f'  ⚠ ONNX image captcha solve failed: {e}'))
+            return None
+
+    def _ocr_space(self, image_url: str) -> Optional[str]:
+        if not self.ocr_space_key:
+            print(ui.warning('  ⚠ OCR.space key missing, cannot solve image captcha automatically.'))
+            return None
+
+        print(ui.warning(f'  🤖 OCR.space solving image captcha: {image_url}'))
+        payload = {
+            'apikey': self.ocr_space_key,
+            'url': image_url,
+            'language': 'eng',
+            'isOverlayRequired': 'false',
+            'OCREngine': '2',
+        }
+
+        try:
+            r = requests.post('https://api.ocr.space/parse/image', data=payload, timeout=30)
+            data = r.json()
+            if data.get('IsErroredOnProcessing'):
+                print(ui.error(f'  OCR.space error: {data.get('ErrorMessage')}'))
+                return None
+
+            parsed = data.get('ParsedResults', [])
+            if not parsed:
+                print(ui.error('  OCR.space returned no parsed results.'))
+                return None
+
+            text = parsed[0].get('ParsedText', '')
+            if not text:
+                print(ui.error('  OCR.space returned empty text.'))
+                return None
+
+            text = re.sub(r'[^A-Za-z0-9]', '', text).strip()
+            if not text:
+                print(ui.error('  OCR.space text cleaned to empty string.'))
+                return None
+
+            print(ui.success(f'  ✅ OCR solved captcha text: {text}'))
+            return text
+        except Exception as e:
+            print(ui.error(f'  OCR.space request failed: {e}'))
+            return None
     
     def _capmonster(self, sitekey: str, rqdata: str, url: str) -> Optional[str]:
         print(ui.warning("  🤖 CapMonster solving..."))
@@ -703,6 +844,8 @@ class VerificationMonitor:
                     continue
                 
                 # Is it asking for verification?
+                # OAH may send randomized image text captchas; detect both keyword
+                # prompts and image attachments so the solver can handle them.
                 oah_image_flag = any(kw in content for kw in self.oah_captcha_keywords)
                 attachments = msg.get("attachments", []) or []
                 has_image_attachment = any(att.get("content_type", "").startswith("image") or att.get("url", "").lower().endswith((".png", ".jpg", ".jpeg", ".gif")) for att in attachments)
@@ -732,6 +875,20 @@ class VerificationMonitor:
                         print(ui.warning(f"  🌐 Open: {captcha_url}"))
                     
                     if oah_image_flag or has_image_attachment:
+                        for att in attachments:
+                            img_url = att.get("url") or att.get("proxy_url")
+                            if not img_url:
+                                continue
+                            solution = self.captcha_handler.solve_image(img_url)
+                            if solution:
+                                print(ui.success(f"  ✅ Solved OAH image captcha: {solution}"))
+                                sent = self.api.send_message(ch, solution)
+                                if sent:
+                                    print(ui.success("  ✅ Sent captcha answer automatically."))
+                                else:
+                                    print(ui.warning("  ⚠ Failed to send captcha answer."))
+                                self.alerted_channels.discard(ch)
+                                return True
                         print(ui.dim("  This looks like an OAH image text captcha. Open the link, read the text, and paste it below."))
                     else:
                         print(ui.dim("  Complete the captcha in your browser then press Enter."))
