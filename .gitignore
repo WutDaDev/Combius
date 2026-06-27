@@ -1,31 +1,13 @@
-# Secrets
 .env
 .env.local
 .env.production
-tokens.txt
-channels.txt
 *.log
-
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
 *.egg-info/
-dist/
-build/
-*.egg
-
-# Virtual env
 venv/
 env/
 .venv/
-
-# IDE
 .vscode/
 .idea/
 *.swp
-*.swo
-
-# Railway
-.railway/
