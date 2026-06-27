@@ -42,6 +42,7 @@ from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
 from collections import deque
 from typing import Optional, Dict, List, Tuple, Any
+import components_v2
 
 # ============================================================
 # SECTION 0: ENVIRONMENT & CONFIG LOADER
@@ -407,6 +408,13 @@ class DiscordAPI:
         except Exception as e:
             print(ui.error(f"  ⚠ Request error: {e}"))
             return None
+
+    def click_component(self, component: Any) -> bool:
+        """Click a parsed component button."""
+        if not component or not getattr(component, 'is_clickable_button', False):
+            return False
+
+        return component.click(self.session_headers)
     
     def send_message(self, channel_id: str, content: str) -> bool:
         """Send a Discord message. Returns True on success."""
@@ -873,6 +881,21 @@ class VerificationMonitor:
                         open_browser(captcha_url)
                     else:
                         print(ui.warning(f"  🌐 Open: {captcha_url}"))
+
+                    parsed_msg = components_v2.message.get_message_obj(msg)
+                    verify_buttons = [
+                        btn
+                        for btn in parsed_msg.buttons
+                        if btn and getattr(btn, 'label', None) and 'verify' in btn.label.lower()
+                    ]
+                    if verify_buttons:
+                        print(ui.secondary("  Attempting to click verify button via components_v2 handler..."))
+                        for button in verify_buttons:
+                            if self.api.click_component(button):
+                                print(ui.success("  ✅ Verify button clicked automatically."))
+                                self.alerted_channels.discard(ch)
+                                return True
+                        print(ui.warning("  ⚠ Failed to click verify button automatically."))
                     
                     if oah_image_flag or has_image_attachment:
                         for att in attachments:
