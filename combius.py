@@ -1656,7 +1656,17 @@ def main():
     print(ui.header("  DEPLOYMENT"))
     print()
     
-    confirm = input(ui.primary("  Start all engines? (y/N): ")).strip().lower()
+    try:
+        confirm = input(ui.primary("  Start all engines? (y/N): ")).strip().lower()
+    except EOFError:
+        print()
+        print(ui.warning("  No input available — aborting."))
+        return
+    except KeyboardInterrupt:
+        print()
+        print(ui.warning("  Aborted."))
+        return
+
     if confirm != 'y':
         print(ui.warning("  Aborted."))
         return
