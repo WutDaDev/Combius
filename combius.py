@@ -1117,6 +1117,8 @@ class CombiusEngine:
         self.inventory_cache = None
         self.last_command = ""
         self.last_sent_command = ""
+        # Per-command memory: record the cycle when a command last ran
+        self.command_last_cycle: Dict[str, int] = {}
 
         # Special command memory
         self.oah_last_run = 0
@@ -1211,30 +1213,57 @@ class CombiusEngine:
     
     def _get_owo_command(self) -> str:
         """Generate exactly one command per turn without repeating the previous one."""
-        # Build base pool safely from available categories
+        # Build weighted pool and respect per-command cooldown memory
         pool = []
-        pool += CMD_POOL.get("gambling", [])
+        # Add gambling commands with moderate weight
+        gambling = CMD_POOL.get("gambling", [])
+        for _ in range(4):
+            pool += gambling
+
+        # Strong bias for 'oh' and 'ob'
+        oh_list = CMD_POOL.get("oh", [])
+        ob_list = CMD_POOL.get("ob", [])
+        for _ in range(12):
+            pool += oh_list + ob_list
+
+        # Keep 'opiku' and 'orun' but with low weight
+        pool += CMD_POOL.get("opiku", []) * 1
+        pool += CMD_POOL.get("orun", []) * 1
+
+        # Also include any smaller pools (hunt, b) if present
         pool += CMD_POOL.get("hunt", [])
         pool += CMD_POOL.get("b", [])
 
-        # Bias towards 'oh' and 'ob' by adding extra copies
-        oh_list = CMD_POOL.get("oh", [])
-        ob_list = CMD_POOL.get("ob", [])
-        for _ in range(4):
-            pool += oh_list + ob_list
+        # Per-command cooldowns (in cycles): keep short for frequent commands,
+        # long for heavy/rare commands. These values can be tuned.
+        cooldowns = {}
+        for c in gambling:
+            cooldowns[c] = 2
+        for c in oh_list + ob_list:
+            cooldowns[c] = 1
+        for c in CMD_POOL.get("opiku", []) + CMD_POOL.get("orun", []):
+            cooldowns[c] = 200
 
-        # Ensure other allowed commands are present
-        pool += CMD_POOL.get("opiku", []) + CMD_POOL.get("orun", [])
+        # Filter out commands that ran too recently according to memory
+        available = []
+        for c in pool:
+            last = self.command_last_cycle.get(c, -999999)
+            cd = cooldowns.get(c, 5)
+            if (self.cycle - last) >= cd:
+                available.append(c)
 
-        # Avoid repeating the last sent command
+        # Avoid repeating the immediate last sent command
         if self.last_sent_command:
-            pool = [c for c in pool if c != self.last_sent_command]
+            available = [c for c in available if c != self.last_sent_command]
 
-        # Fallback if pool becomes empty
-        if not pool:
-            pool = CMD_POOL.get("gambling", []) + CMD_POOL.get("oh", []) + CMD_POOL.get("ob", [])
+        # Fallback: if nothing is available, relax cooldowns for frequent commands
+        if not available:
+            available = [c for c in pool if c in (oh_list + ob_list + gambling)]
 
-        cmd = random.choice(pool) if pool else "owo slots 10"
+        cmd = random.choice(available) if available else "owo slots 10"
+
+        # Update memory and last sent
+        self.command_last_cycle[cmd] = self.cycle
         self.last_sent_command = cmd
         return cmd
 
