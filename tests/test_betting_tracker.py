@@ -65,6 +65,27 @@ class BettingTrackerTests(unittest.TestCase):
 
         self.assertEqual(tracker.state['cf']['current_bet'], 10)
 
+    def test_stop_loss_warning_callback_is_triggered_and_resets_to_base(self):
+        warnings = []
+        tracker = BettingTracker(base_bets={'cf': 10, 'bj': 10, 'slots': 10}, stop_loss_limit=20000,
+                                 notify_chat=lambda msg: warnings.append(msg))
+        tracker.state['cf']['current_bet'] = 20000
+        msg = {
+            'author': {'id': '408785106942115850'},
+            'content': 'You lost 10000 cowoncy in coinflip.'
+        }
+
+        tracker.handle_message(msg)
+
+        self.assertEqual(tracker.state['cf']['current_bet'], 10)
+        self.assertTrue(any('Stop-loss triggered' in warning for warning in warnings))
+
+    def test_next_suggested_coinflip_command_respects_stop_loss_limit(self):
+        tracker = BettingTracker(base_bets={'cf': 10, 'bj': 10, 'slots': 10}, stop_loss_limit=20000)
+        tracker.state['cf']['current_bet'] = 20000
+
+        self.assertEqual(tracker.get_next_command_suggestion('cf'), 'owo cf 10')
+
     def test_token_analytics_path_is_unique_per_token(self):
         path_a = build_token_analytics_path('token-alpha')
         path_b = build_token_analytics_path('token-beta')

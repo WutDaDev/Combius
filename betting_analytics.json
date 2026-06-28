@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-06-28T09:52:40.840412Z",
+  "net_profit_loss": -10000,
+  "state": {
+    "cf": {
+      "base_bet": 10,
+      "current_bet": 10
+    },
+    "bj": {
+      "base_bet": 10,
+      "current_bet": 10
+    },
+    "slots": {
+      "base_bet": 10,
+      "current_bet": 10
+    }
+  },
+  "results": [
+    {
+      "game": "cf",
+      "outcome": "loss",
+      "amount": 10000,
+      "current_bet": 10,
+      "net_profit_loss": -10000
+    }
+  ],
+  "ob_commands_disabled": false
+}

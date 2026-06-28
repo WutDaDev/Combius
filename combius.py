@@ -39,12 +39,13 @@ import platform
 import subprocess
 import signal
 import hashlib
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 import requests
 from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
 from collections import deque
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Tuple, Any, Callable
 import components_v2
 
 # ============================================================
@@ -176,6 +177,8 @@ CONFIG = {
     "OWO_BET_BASE_SLOTS": env_int('OWO_BET_BASE_SLOTS', 10),
     "OWO_BET_STOP_LOSS_LIMIT": env_int('OWO_BET_STOP_LOSS_LIMIT', 20000),
     "OWO_TARGET_USER_ID": os.environ.get('OWO_TARGET_USER_ID', ''),
+    "ANALYTICS_PORT": env_int('ANALYTICS_PORT', 8000),
+    "ANALYTICS_HOST": os.environ.get('ANALYTICS_HOST', '0.0.0.0'),
     # User ID to ping when a "⚠ are you ..." style flag appears. Set to your numeric user id.
     "ALERT_PING_USER_ID": os.environ.get('ALERT_PING_USER_ID', ''),
     # Path to log file where flagged message JSON lines will be appended
@@ -510,47 +513,72 @@ class InventoryParser:
             "crate_count": 0,
             "all_items": {},
         }
+
+        def _extract_text_blocks(msg: dict) -> List[str]:
+            blocks = []
+            content = msg.get("content", "")
+            if content:
+                blocks.append(content)
+
+            for embed in msg.get("embeds", []) or []:
+                if not isinstance(embed, dict):
+                    continue
+                for key in ("description", "title"):
+                    value = embed.get(key, "")
+                    if value:
+                        blocks.append(str(value))
+                for field in embed.get("fields", []) or []:
+                    if not isinstance(field, dict):
+                        continue
+                    for key in ("name", "value"):
+                        value = field.get(key, "")
+                        if value:
+                            blocks.append(str(value))
+            return blocks
         
         for msg in messages:
-            content = msg.get("content", "")
             author_id = msg.get("author", {}).get("id", "")
             
             # Skip own messages
             if author_id == own_user_id:
                 continue
+
+            text_blocks = _extract_text_blocks(msg)
+            combined_text = "\n".join(text_blocks)
             
             # Check for inventory header
-            if "**Inventory**" not in content and "Inventory" not in content:
+            if "**Inventory**" not in combined_text and "Inventory" not in combined_text:
                 continue
             
             result["success"] = True
             
             # Parse each line
-            lines = content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                # Match: "ID  ×  COUNT  ⠀ItemName"
-                match = re.search(r'(\d+)\s*[×xX]\s*(\d+)', line)
-                if not match:
-                    continue
-                
-                item_id = int(match.group(1))
-                count = int(match.group(2))
-                result["all_items"][item_id] = count
-                
-                # Categorize
-                if item_id == LOOTBOX_ID:
-                    result["lootbox_count"] = count
-                elif item_id == FABLED_LOOTBOX_ID:
-                    result["fabled_lootbox_count"] = count
-                elif item_id == WEAPON_CRATE_ID:
-                    result["crate_count"] = count
-                elif item_id in ALL_GEM_IDS:
-                    result["gem_ids"].append(item_id)
-                    result["gem_quantities"][item_id] = count
+            for block in text_blocks:
+                lines = block.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Match: "ID  ×  COUNT  ⠀ItemName"
+                    match = re.search(r'(\d+)\s*[×xX]\s*(\d+)', line)
+                    if not match:
+                        continue
+                    
+                    item_id = int(match.group(1))
+                    count = int(match.group(2))
+                    result["all_items"][item_id] = count
+                    
+                    # Categorize
+                    if item_id == LOOTBOX_ID:
+                        result["lootbox_count"] = count
+                    elif item_id == FABLED_LOOTBOX_ID:
+                        result["fabled_lootbox_count"] = count
+                    elif item_id == WEAPON_CRATE_ID:
+                        result["crate_count"] = count
+                    elif item_id in ALL_GEM_IDS:
+                        result["gem_ids"].append(item_id)
+                        result["gem_quantities"][item_id] = count
             
             break  # Only first inventory response
         
@@ -875,11 +903,13 @@ class BettingTracker:
     OFFICIAL_OWO_BOT_ID = "408785106942115850"
 
     def __init__(self, base_bets: Optional[Dict[str, int]] = None, stop_loss_limit: int = 20000,
-                 target_user_id: Optional[str] = None, analytics_path: Optional[str] = None):
+                 target_user_id: Optional[str] = None, analytics_path: Optional[str] = None,
+                 notify_chat: Optional[Callable[[str], None]] = None):
         self.base_bets = dict(base_bets or {'cf': 10, 'bj': 10, 'slots': 10})
         self.stop_loss_limit = stop_loss_limit
         self.target_user_id = target_user_id or ''
         self.analytics_path = analytics_path or str(Path(__file__).with_name('betting_analytics.json'))
+        self.notify_chat = notify_chat
         self.state = {
             game: {'base_bet': int(self.base_bets.get(game, 10)), 'current_bet': int(self.base_bets.get(game, 10))}
             for game in ('cf', 'bj', 'slots')
@@ -955,6 +985,26 @@ class BettingTracker:
             return 'slots'
         return None
 
+    def _notify_stop_loss(self, game: str) -> None:
+        message = (
+            "⚠️ Stop-loss triggered! Bet reached over 20,000. Resetting back to base bet to save your wallet."
+        )
+        print(ui.warning(f"  {message}"))
+        if self.notify_chat is not None:
+            self.notify_chat(message)
+
+    def get_next_command_suggestion(self, game: str) -> str:
+        state = self.state.get(game, self.state['cf'])
+        current_bet = int(state.get('current_bet', state.get('base_bet', 10)))
+        base_bet = int(state.get('base_bet', current_bet))
+        if current_bet >= self.stop_loss_limit:
+            suggested_bet = base_bet
+        else:
+            suggested_bet = current_bet
+        if game == 'cf':
+            return f"owo cf {suggested_bet}"
+        return f"owo {game} {suggested_bet}"
+
     def _apply_strategy(self, game: str, outcome: str, amount: Optional[int]) -> dict:
         state = self.state[game]
         if outcome == 'tie':
@@ -963,8 +1013,8 @@ class BettingTracker:
             new_bet = state['base_bet']
         else:
             next_bet = state['current_bet'] * 2
-            if next_bet > self.stop_loss_limit:
-                print(ui.warning(f"  ⚠️ Stop-loss triggered! Bet exceeded {self.stop_loss_limit}. Resetting back to base bet."))
+            if state['current_bet'] >= self.stop_loss_limit or next_bet > self.stop_loss_limit:
+                self._notify_stop_loss(game)
                 new_bet = state['base_bet']
             else:
                 new_bet = next_bet
@@ -1961,7 +2011,39 @@ class CombiusEngine:
 
 
 # ============================================================
-# SECTION 10: BANNER & MAIN
+# SECTION 10: ANALYTICS SERVER
+# ============================================================
+
+class AnalyticsServerThread(threading.Thread):
+    """Serve the analytics dashboard from a background HTTP server."""
+
+    def __init__(self, host: str = '0.0.0.0', port: int = 8000, directory: Optional[str] = None):
+        super().__init__(daemon=True)
+        self.host = host
+        self.port = port
+        self.directory = directory or str(Path(__file__).parent)
+        self.httpd = None
+
+    def run(self):
+        handler = lambda *args, **kwargs: SimpleHTTPRequestHandler(*args, directory=self.directory, **kwargs)
+        self.httpd = ThreadingHTTPServer((self.host, self.port), handler)
+        print(ui.success(f"  🌐 Analytics server listening on http://{self.host}:{self.port}/analytics.html"))
+        try:
+            self.httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if self.httpd:
+                self.httpd.server_close()
+
+    def stop(self):
+        if self.httpd:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+
+
+# ============================================================
+# SECTION 11: BANNER & MAIN
 # ============================================================
 
 BANNER = """
@@ -2009,6 +2091,10 @@ def main():
     print(BANNER)
     # Auto-start support: env var START_ENGINES or CLI flag --yes / -y
     auto_start = False
+    analytics_server = None
+    if CONFIG.get('ANALYTICS_PORT', 0) > 0:
+        analytics_server = AnalyticsServerThread(host=CONFIG['ANALYTICS_HOST'], port=CONFIG['ANALYTICS_PORT'])
+        analytics_server.start()
     if any(a in ("--yes", "-y") for a in sys.argv[1:]):
         auto_start = True
     if os.environ.get('START_ENGINES', '').lower() in ('1', 'true', 'yes', 'y'):
