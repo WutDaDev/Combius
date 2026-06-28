@@ -38,6 +38,8 @@ import threading
 import platform
 import subprocess
 import signal
+import hashlib
+from pathlib import Path
 import requests
 from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
@@ -1136,6 +1138,13 @@ class CombiusEngine:
         
         # Resolve gem IDs (per-token override)
         self.gem_ids = self._resolve_gem_ids()
+
+        # Load persistent schedule state (so scheduled tasks survive restarts)
+        try:
+            self._load_schedule_state()
+        except Exception:
+            pass
+
     
     def _resolve_gem_ids(self) -> List[int]:
         """Check for per-token gem overrides."""
@@ -1292,6 +1301,11 @@ class CombiusEngine:
             self.last_piku_run_date = date_today
         elif cmd in {'owo run', 'orun'}:
             self.last_run_run_date = date_today
+        # Persist the state so restarts don't lose scheduled-run history
+        try:
+            self._save_schedule_state()
+        except Exception:
+            pass
 
     def _command_delay(self, cmd: str) -> float:
         """Return the delay after a command, using a configured fixed delay by default."""
@@ -1326,6 +1340,47 @@ class CombiusEngine:
             return 'orun'
 
         return None
+
+    # ---- Persistent schedule state helpers ----
+    def _schedule_state_file(self) -> Path:
+        return Path(CONFIG.get('SCHEDULE_STATE_FILE', 'schedules.json'))
+
+    def _token_key(self) -> str:
+        # Use a short hash of the token to avoid writing raw tokens to disk
+        return hashlib.sha256(self.token.encode('utf-8')).hexdigest()
+
+    def _load_schedule_state(self):
+        p = self._schedule_state_file()
+        if not p.exists():
+            return
+        data = json.loads(p.read_text())
+        key = self._token_key()
+        entry = data.get(key, {})
+        if 'last_piku' in entry:
+            try:
+                self.last_piku_run_date = datetime.strptime(entry['last_piku'], '%Y-%m-%d').date()
+            except Exception:
+                self.last_piku_run_date = None
+        if 'last_run' in entry:
+            try:
+                self.last_run_run_date = datetime.strptime(entry['last_run'], '%Y-%m-%d').date()
+            except Exception:
+                self.last_run_run_date = None
+
+    def _save_schedule_state(self):
+        p = self._schedule_state_file()
+        try:
+            data = json.loads(p.read_text()) if p.exists() else {}
+        except Exception:
+            data = {}
+        key = self._token_key()
+        entry = data.get(key, {})
+        if self.last_piku_run_date:
+            entry['last_piku'] = self.last_piku_run_date.isoformat()
+        if self.last_run_run_date:
+            entry['last_run'] = self.last_run_run_date.isoformat()
+        data[key] = entry
+        p.write_text(json.dumps(data, indent=2))
     
     def _check_rate_limit(self) -> bool:
         """Check if we're within rate limits. Returns True if should proceed."""
