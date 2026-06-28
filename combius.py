@@ -1211,12 +1211,30 @@ class CombiusEngine:
     
     def _get_owo_command(self) -> str:
         """Generate exactly one command per turn without repeating the previous one."""
-        pool = CMD_POOL["gambling"] + CMD_POOL["hunt"] + CMD_POOL["b"]
+        # Build base pool safely from available categories
+        pool = []
+        pool += CMD_POOL.get("gambling", [])
+        pool += CMD_POOL.get("hunt", [])
+        pool += CMD_POOL.get("b", [])
+
+        # Bias towards 'oh' and 'ob' by adding extra copies
+        oh_list = CMD_POOL.get("oh", [])
+        ob_list = CMD_POOL.get("ob", [])
+        for _ in range(4):
+            pool += oh_list + ob_list
+
+        # Ensure other allowed commands are present
+        pool += CMD_POOL.get("opiku", []) + CMD_POOL.get("orun", [])
+
+        # Avoid repeating the last sent command
         if self.last_sent_command:
             pool = [c for c in pool if c != self.last_sent_command]
+
+        # Fallback if pool becomes empty
         if not pool:
-            pool = CMD_POOL["gambling"] + CMD_POOL["hunt"] + CMD_POOL["b"]
-        cmd = random.choice(pool)
+            pool = CMD_POOL.get("gambling", []) + CMD_POOL.get("oh", []) + CMD_POOL.get("ob", [])
+
+        cmd = random.choice(pool) if pool else "owo slots 10"
         self.last_sent_command = cmd
         return cmd
 
