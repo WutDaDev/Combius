@@ -1596,6 +1596,24 @@ class CombiusEngine:
         # 'owo claim' disabled by user request; only run 'owo daily' if desired
         print(ui.dim(f"  [{self.username}] ⚠ Skipping 'owo claim' (disabled)."))
         time.sleep(random.uniform(2, 3))
+
+        # Check oldest recent message for 'Nu!' which indicates daily already claimed
+        try:
+            msgs = self.api.fetch_messages(channel, limit=50)
+            if msgs:
+                oldest = msgs[-1]
+                content = oldest.get('content', '') if isinstance(oldest, dict) else ''
+                if 'Nu!' in content:
+                    print(ui.warning(f"  [{self.username}] ⚠ Detected 'Nu!' in oldest message — daily already claimed. Skipping 'owo daily'."))
+                    try:
+                        self._append_schedule_log({'cmd': 'owo daily', 'status': 'skipped_already_claimed', 'time': self._gmt7_now().isoformat()})
+                    except Exception:
+                        pass
+                    self.last_claim_time = time.time()
+                    return
+        except Exception:
+            pass
+
         self.api.send_message(channel, "owo daily")
         
         self.last_claim_time = time.time()
