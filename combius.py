@@ -1430,9 +1430,9 @@ class CombiusEngine:
         """Claim daily rewards."""
         channel = self._pick_channel()
         print(ui.secondary(f"  [{self.username}] 🎁 Claiming daily..."))
-        
-        self.api.send_message(channel, "owo claim")
-        time.sleep(random.uniform(2, 4))
+        # 'owo claim' disabled by user request; only run 'owo daily' if desired
+        print(ui.dim(f"  [{self.username}] ⚠ Skipping 'owo claim' (disabled)."))
+        time.sleep(random.uniform(2, 3))
         self.api.send_message(channel, "owo daily")
         
         self.last_claim_time = time.time()
