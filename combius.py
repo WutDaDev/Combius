@@ -1629,7 +1629,8 @@ def main():
     print(f"  {ui.dim('Delay:')}      {ui.primary(f'{CONFIG["MIN_DELAY"]}s - {CONFIG["MAX_DELAY"]}s')}")
     if CONFIG["DELAY_SPIKE_CHANCE"] > 0:
         print(f"  {ui.dim('Spikes:')}     {ui.dim(f'up to {CONFIG["DELAY_SPIKE_MAX"]}s ({CONFIG["DELAY_SPIKE_CHANCE"]*100:.0f}% chance)')}")
-    print(f"  {ui.dim('Sellall:')}    {ui.warning(f'every {CONFIG['SELLALL_INTERVAL']}±{CONFIG['SELLALL_VARIANCE']} / {CONFIG['SELLALL_COOLDOWN']}s cd')}")
+    sellall_text = f"every {CONFIG['SELLALL_INTERVAL']}±{CONFIG['SELLALL_VARIANCE']} / {CONFIG['SELLALL_COOLDOWN']}s cd"
+    print(f"  {ui.dim('Sellall:')}    {ui.warning(sellall_text)}")
     gem_status = 'ON' if CONFIG['GEM_ENABLED'] else 'OFF'
     gem_details = f"(scan: {CONFIG['AUTO_SCAN_GEMS']}, IDs: {CONFIG['GEM_IDS']})" if CONFIG['GEM_ENABLED'] else ''
     print(f"  {ui.dim('Gems:')}       {ui.secondary(gem_status)} {gem_details}")
