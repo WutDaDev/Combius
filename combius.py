@@ -144,8 +144,8 @@ CONFIG = {
     "TOKEN_ROTATION": env_bool('TOKEN_ROTATION', False),
 
     # --- OWO Special Commands ---
-    "OAH_ENABLED": env_bool('OAH_ENABLED', True),
-    "OAH_COMMAND": os.environ.get('OAH_COMMAND', 'owo autohunt'),
+    "OAH_ENABLED": False,
+    "OAH_COMMAND": 'owo autohunt',
     "OAH_DURATION_SECONDS": env_int('OAH_DURATION_SECONDS', 120),
     "OAH_REST_MINUTES": env_int('OAH_REST_MINUTES', 30),
 
@@ -1263,26 +1263,9 @@ class CombiusEngine:
         """Return a scheduled command if a special command is due."""
         now = time.time()
 
-        # If OAH completed and claim is still pending, claim immediately
-        if self.oah_complete_at and now >= self.oah_complete_at and not self.oah_claimed:
-            self.oah_claimed = True
-            self.oah_rest_until = now + CONFIG['OAH_REST_MINUTES'] * 60
-            self.oah_complete_at = 0
-            print(ui.secondary(f"  [{self.username}] ⏱ OAH complete — claiming now and resting {CONFIG['OAH_REST_MINUTES']}m"))
-            return 'owo claim'
-
-        # Keep OAH resting for the configured cooldown
-        if self.oah_rest_until and now < self.oah_rest_until:
+        # Autohunt is disabled by request.
+        if CONFIG['OAH_ENABLED']:
             return None
-
-        # Run OAH when ready if enabled and not already active
-        if CONFIG['OAH_ENABLED'] and not self.oah_complete_at and self.oah_claimed:
-            self.oah_last_run = now
-            self.oah_complete_at = now + CONFIG['OAH_DURATION_SECONDS']
-            self.oah_claimed = False
-            expected = datetime.fromtimestamp(self.oah_complete_at).strftime('%H:%M:%S')
-            print(ui.secondary(f"  [{self.username}] 🤖 Running {CONFIG['OAH_COMMAND']} — will complete at {expected}"))
-            return CONFIG['OAH_COMMAND']
 
         # Daily scheduled commands in GMT+7
         if CONFIG['OWO_PIKU_ENABLED'] and self._daily_task_due(self.last_piku_run_date, CONFIG['OWO_PIKU_DAILY_TIME']):
