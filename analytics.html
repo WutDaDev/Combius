@@ -160,7 +160,8 @@
       const tokenSelect = document.getElementById('token-select');
 
       async function listTokenFiles() {
-        const files = new Set(['betting_analytics.json']);
+        const files = new Map();
+        files.set('betting_analytics.json', { name: 'betting_analytics.json', mtime: 0 });
         try {
           const response = await fetch(`./?t=${Date.now()}`);
           const html = await response.text();
@@ -168,7 +169,7 @@
           matches.forEach((match) => {
             const href = match[1].split('?')[0];
             if (href.startsWith('betting_analytics') && href.endsWith('.json')) {
-              files.add(href);
+              files.set(href, { name: href, mtime: 0 });
             }
           });
         } catch (error) {
@@ -177,9 +178,10 @@
 
         const maybeFallback = window.location.searchParams.get('file');
         if (maybeFallback) {
-          files.add(maybeFallback);
+          files.set(maybeFallback, { name: maybeFallback, mtime: Date.now() });
         }
-        return [...files].sort();
+
+        return [...files.values()].sort((a, b) => b.mtime - a.mtime);
       }
 
       async function loadData() {
@@ -194,15 +196,18 @@
           return;
         }
 
-        files.forEach((file) => {
+        files.forEach((fileInfo) => {
           const option = document.createElement('option');
-          option.value = file;
-          const name = file === 'betting_analytics.json' ? 'Default' : file.replace('betting_analytics_', '').replace('.json', '');
+          option.value = fileInfo.name;
+          const name = fileInfo.name === 'betting_analytics.json'
+            ? 'Latest'
+            : fileInfo.name.replace('betting_analytics_', '').replace('.json', '');
           option.textContent = name;
           tokenSelect.appendChild(option);
         });
 
-        const selected = tokenSelect.value || files[0];
+        const preferred = window.location.searchParams.get('file') || files[0]?.name || 'betting_analytics.json';
+        const selected = preferred;
         if (!selected) return;
         tokenSelect.value = selected;
 
