@@ -696,7 +696,7 @@ class CaptchaHandler:
             r = requests.post('https://api.ocr.space/parse/image', data=payload, timeout=30)
             data = r.json()
             if data.get('IsErroredOnProcessing'):
-                print(ui.error(f'  OCR.space error: {data.get('ErrorMessage')}'))
+                print(ui.error(f"  OCR.space error: {data.get('ErrorMessage')}") )
                 return None
 
             parsed = data.get('ParsedResults', [])
