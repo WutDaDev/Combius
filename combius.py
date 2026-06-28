@@ -214,11 +214,13 @@ GEM_TIER_LEVEL = {**{i: i-50 for i in range(51, 58)},   # 51->1, 57->7
                   **{i: i-64 for i in range(65, 72)},    # 65->1, 71->7
                   **{i: i-71 for i in range(72, 79)}}    # 72->1, 78->7
 
-# OWO Command pool for the requested behavior: gambling + hunt + owo b only.
+# OWO Command pool for the requested behavior: gambling + oh + ob + opiku + orun only.
 CMD_POOL = {
     "gambling": ["owo slots 10", "owo coinflip head 10", "owo coinflip tail 10"],
-    "hunt": ["owo hunt"],
-    "b": ["owo b"],
+    "oh": ["oh"],
+    "ob": ["ob"],
+    "opiku": ["opiku"],
+    "orun": ["orun"],
 }
 
 # Safety channel check intervals (seconds)
@@ -1239,9 +1241,9 @@ class CombiusEngine:
 
     def _record_daily_run(self, cmd: str):
         date_today = self._gmt7_now().date()
-        if cmd == 'owo piku':
+        if cmd in {'owo piku', 'opiku'}:
             self.last_piku_run_date = date_today
-        elif cmd == 'owo run':
+        elif cmd in {'owo run', 'orun'}:
             self.last_run_run_date = date_today
 
     def _command_delay(self, cmd: str) -> float:
@@ -1285,13 +1287,13 @@ class CombiusEngine:
         # Daily scheduled commands in GMT+7
         if CONFIG['OWO_PIKU_ENABLED'] and self._daily_task_due(self.last_piku_run_date, CONFIG['OWO_PIKU_DAILY_TIME']):
             self._record_daily_run('owo piku')
-            print(ui.secondary(f"  [{self.username}] 📅 Scheduled owo piku for GMT+7 {CONFIG['OWO_PIKU_DAILY_TIME']}"))
-            return 'owo piku'
+            print(ui.secondary(f"  [{self.username}] 📅 Scheduled opiku for GMT+7 {CONFIG['OWO_PIKU_DAILY_TIME']}"))
+            return 'opiku'
 
         if CONFIG['OWO_RUN_ENABLED'] and self._daily_task_due(self.last_run_run_date, CONFIG['OWO_RUN_DAILY_TIME']):
-            self._record_daily_run('owo run')
-            print(ui.secondary(f"  [{self.username}] 📅 Scheduled owo run for GMT+7 {CONFIG['OWO_RUN_DAILY_TIME']}"))
-            return 'owo run'
+            self._record_daily_run('orun')
+            print(ui.secondary(f"  [{self.username}] 📅 Scheduled orun for GMT+7 {CONFIG['OWO_RUN_DAILY_TIME']}"))
+            return 'orun'
 
         return None
     
