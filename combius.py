@@ -151,8 +151,9 @@ CONFIG = {
     "OAH_DURATION_SECONDS": env_int('OAH_DURATION_SECONDS', 120),
     "OAH_REST_MINUTES": env_int('OAH_REST_MINUTES', 30),
 
-    "OWO_PIKU_ENABLED": env_bool('OWO_PIKU_ENABLED', True),
-    "OWO_RUN_ENABLED": env_bool('OWO_RUN_ENABLED', True),
+    # Disabled by user request
+    "OWO_PIKU_ENABLED": env_bool('OWO_PIKU_ENABLED', False),
+    "OWO_RUN_ENABLED": env_bool('OWO_RUN_ENABLED', False),
     "OWO_PIKU_DAILY_TIME": os.environ.get('OWO_PIKU_DAILY_TIME', '13:30'),
     "OWO_RUN_DAILY_TIME": os.environ.get('OWO_RUN_DAILY_TIME', '13:30'),
     "SCHEDULE_STATE_FILE": os.environ.get('SCHEDULE_STATE_FILE', 'schedules.json'),
@@ -224,8 +225,7 @@ CMD_POOL = {
     "gambling": ["owo slots 10", "owo coinflip head 10", "owo coinflip tail 10"],
     "oh": ["oh"],
     "ob": ["ob"],
-    "opiku": ["opiku"],
-    "orun": ["orun"],
+    # 'opiku' and 'orun' removed by user request
 }
 
 # Safety channel check intervals (seconds)
