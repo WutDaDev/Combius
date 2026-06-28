@@ -1030,7 +1030,13 @@ class BettingTracker:
             'ob_commands_disabled': self.ob_commands_disabled,
         }
         try:
-            Path(self.analytics_path).write_text(json.dumps(payload, indent=2), encoding='utf-8')
+            target_path = Path(self.analytics_path)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+            default_path = target_path.parent / 'betting_analytics.json'
+            if default_path != target_path:
+                default_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
         except Exception:
             pass
 

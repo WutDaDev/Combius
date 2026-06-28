@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 
 os.environ.setdefault('DISCORD_TOKENS', 'token1')
@@ -85,6 +86,14 @@ class BettingTrackerTests(unittest.TestCase):
         tracker.state['cf']['current_bet'] = 20000
 
         self.assertEqual(tracker.get_next_command_suggestion('cf'), 'owo cf 10')
+
+    def test_persist_analytics_writes_default_file_alias(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tracker = BettingTracker(base_bets={'cf': 10, 'bj': 10, 'slots': 10}, analytics_path=os.path.join(tmpdir, 'token.json'))
+            tracker._persist_analytics()
+
+            default_path = os.path.join(tmpdir, 'betting_analytics.json')
+            self.assertTrue(os.path.exists(default_path))
 
     def test_token_analytics_path_is_unique_per_token(self):
         path_a = build_token_analytics_path('token-alpha')
