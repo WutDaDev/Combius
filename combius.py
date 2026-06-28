@@ -537,14 +537,16 @@ class InventoryParser:
         return result
     
     @staticmethod
-    def get_best_gems(inv_data: dict, min_tier: int = 3) -> List[int]:
+    def get_best_gems(inv_data: dict, min_tier: int = 3, preferred_ids: Optional[List[int]] = None) -> List[int]:
         """Get the best gem of each type (hunting, empowering, lucky) from inventory.
 
         This uses inventory quantities and avoids selecting gems with zero quantities.
-        Only one gem per gem type is selected per equip action.
+        It prefers the highest-tier gems available, while still honoring user-preferred IDs
+        if they are present in the inventory and meet the tier threshold.
         """
         gem_quantities = inv_data.get("gem_quantities", {}) or {}
         gems = inv_data.get("gem_ids", [])
+        preferred = [g for g in (preferred_ids or []) if g in gems]
 
         def _valid_candidates(group_ids: List[int]) -> List[int]:
             candidates = []
@@ -552,8 +554,9 @@ class InventoryParser:
                 quantity = gem_quantities.get(gem_id, 0)
                 if quantity <= 0:
                     continue
-                if GEM_TIER_LEVEL.get(gem_id, 0) >= min_tier:
-                    candidates.append(gem_id)
+                if GEM_TIER_LEVEL.get(gem_id, 0) < min_tier:
+                    continue
+                candidates.append(gem_id)
             return candidates
 
         hunting = _valid_candidates([g for g in gems if g in HUNTING_GEMS])
@@ -562,16 +565,19 @@ class InventoryParser:
 
         best = []
         for gem_list in [hunting, empowering, lucky]:
-            if gem_list:
-                best.append(gem_list[0])
+            if not gem_list:
+                continue
+            preferred_match = next((g for g in preferred if g in gem_list), None)
+            best.append(preferred_match or gem_list[0])
 
-        # Fallback: if none found, take any visible gems with quantity > 0
+        # Fallback: if none found, take any visible gems with quantity > 0, preferring configured IDs
         if not best and gems:
             fallback = []
-            for gem_id in sorted(set(gems), reverse=True):
+            for gem_id in preferred + sorted(set(gems), reverse=True):
                 if gem_quantities.get(gem_id, 0) <= 0:
                     continue
-                fallback.append(gem_id)
+                if gem_id not in fallback:
+                    fallback.append(gem_id)
             if fallback:
                 best = fallback[:3]
 
@@ -1369,13 +1375,14 @@ class CombiusEngine:
         if CONFIG["AUTO_SCAN_GEMS"] and self.discovered_gems:
             # Use best gems from inventory scan
             gems_to_equip = InventoryParser.get_best_gems(
-                {"gem_ids": self.discovered_gems}, 
-                CONFIG["MIN_GEM_TIER"]
+                {"gem_ids": self.discovered_gems, "gem_quantities": {gid: 1 for gid in self.discovered_gems}},
+                CONFIG["MIN_GEM_TIER"],
+                self.gem_ids
             )
         
         if not gems_to_equip and self.inventory_cache and self.inventory_cache["success"]:
             gems_to_equip = InventoryParser.get_best_gems(
-                self.inventory_cache, CONFIG["MIN_GEM_TIER"]
+                self.inventory_cache, CONFIG["MIN_GEM_TIER"], self.gem_ids
             )
         
         if not gems_to_equip:
