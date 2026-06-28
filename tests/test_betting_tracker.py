@@ -44,7 +44,7 @@ class BettingTrackerTests(unittest.TestCase):
         tracker.state['slots']['current_bet'] = 20
         msg = {
             'author': {'id': '408785106942115850'},
-            'content': 'Slots x2.5 reward! You won 20 cowoncy.'
+            'content': 'and won <:cowoncy:416043450337853441>',
         }
 
         result = tracker.handle_message(msg)
@@ -59,7 +59,7 @@ class BettingTrackerTests(unittest.TestCase):
         tracker.state['cf']['current_bet'] = 20000
         msg = {
             'author': {'id': '408785106942115850'},
-            'content': 'You lost 10000 cowoncy in coinflip.'
+            'content': 'You lost it all... :c'
         }
 
         tracker.handle_message(msg)
@@ -73,13 +73,25 @@ class BettingTrackerTests(unittest.TestCase):
         tracker.state['cf']['current_bet'] = 20000
         msg = {
             'author': {'id': '408785106942115850'},
-            'content': 'You lost 10000 cowoncy in coinflip.'
+            'content': 'You lost it all... :c'
         }
 
         tracker.handle_message(msg)
 
         self.assertEqual(tracker.state['cf']['current_bet'], 10)
         self.assertTrue(any('Stop-loss triggered' in warning for warning in warnings))
+
+    def test_conservative_mode_grows_by_base_bet_on_loss(self):
+        tracker = BettingTracker(base_bets={'cf': 10, 'bj': 10, 'slots': 10}, betting_mode='capped')
+        tracker.state['cf']['current_bet'] = 10
+        msg = {
+            'author': {'id': '408785106942115850'},
+            'content': 'You lost it all... :c'
+        }
+
+        tracker.handle_message(msg)
+
+        self.assertEqual(tracker.state['cf']['current_bet'], 20)
 
     def test_next_suggested_coinflip_command_respects_stop_loss_limit(self):
         tracker = BettingTracker(base_bets={'cf': 10, 'bj': 10, 'slots': 10}, stop_loss_limit=20000)

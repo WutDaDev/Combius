@@ -904,10 +904,11 @@ class BettingTracker:
 
     def __init__(self, base_bets: Optional[Dict[str, int]] = None, stop_loss_limit: int = 20000,
                  target_user_id: Optional[str] = None, analytics_path: Optional[str] = None,
-                 notify_chat: Optional[Callable[[str], None]] = None):
+                 notify_chat: Optional[Callable[[str], None]] = None, betting_mode: str = 'martingale'):
         self.base_bets = dict(base_bets or {'cf': 10, 'bj': 10, 'slots': 10})
         self.stop_loss_limit = stop_loss_limit
         self.target_user_id = target_user_id or ''
+        self.betting_mode = betting_mode.lower()
         self.analytics_path = analytics_path or str(Path(__file__).with_name('betting_analytics.json'))
         self.notify_chat = notify_chat
         self.state = {
@@ -968,7 +969,7 @@ class BettingTracker:
                 return 'win'
             return None
         if game == 'slots':
-            if re.search(r'\blost\b', lowered):
+            if re.search(r'\bwon nothing\b', lowered):
                 return 'loss'
             if re.search(r'\bwon\b|\bx\d+(?:\.\d+)?\b', lowered):
                 return 'win'
@@ -1012,7 +1013,10 @@ class BettingTracker:
         elif outcome == 'win':
             new_bet = state['base_bet']
         else:
-            next_bet = state['current_bet'] * 2
+            if self.betting_mode == 'capped':
+                next_bet = state['current_bet'] + state['base_bet']
+            else:
+                next_bet = state['current_bet'] * 2
             if state['current_bet'] >= self.stop_loss_limit or next_bet > self.stop_loss_limit:
                 self._notify_stop_loss(game)
                 new_bet = state['base_bet']
