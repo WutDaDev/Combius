@@ -28,6 +28,7 @@ except ImportError:
 from captcha_solver import CaptchaSolver
 
 TOKENS = [t.strip() for t in os.environ.get('DISCORD_TOKENS', '').split(',') if t.strip()]
+DEBUG = os.environ.get('MASS_JOIN_DEBUG', '').lower() in ('1','true','yes')
 
 HEADERS_TEMPLATE = {
     "Content-Type": "application/json",
@@ -119,6 +120,12 @@ def join_server(token, invite_code, solver):
         time.sleep(retry + 1)
         return join_server(token, invite_code, solver)
     
+    # Debug output
+    if DEBUG:
+        try:
+            print(f"[{username}] Response body: {r.text}")
+        except Exception:
+            pass
     print(f"[{username}] ❌ HTTP {r.status_code}")
     return False
 
